@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "baseRepository": "https://github.com/Umphman/otel-onboarding-experience-case-study",
+  "baseCommit": "cc80d436d65e09854102ddb005d11a76bd2a9a60",
+  "patchFile": "local-corrections.patch",
+  "patchSha256": "ee80252ec40d6a4596afe87d2fd220394151d8bcb4e19f698151aaf4b22d14f9",
+  "fileHashNormalization": "UTF-8 bytes with CRLF and CR line endings normalized to LF",
+  "files": [
+    {
+      "path": "README.md",
+      "status": "modified",
+      "beforeSha256Lf": "209ad7c0a7a8401baf0d523f0ac0682147325813c483b7646b077c8d3a559cf7",
+      "afterSha256Lf": "88f6cb513f41fa919cfd9fc03ae02bc46d0224eb69194fd98ae9b35de739508a"
+    },
+    {
+      "path": "docker-compose.yml",
+      "status": "modified",
+      "beforeSha256Lf": "d3cc4a1dc4977b2f9951c1025360ef30309dcc566b63232d03cbd5ba049c5431",
+      "afterSha256Lf": "7e2208d6c25c8c55cbbc0122457ef2a3bee274c64f92f41dc8f3832a3c90bfe9"
+    },
+    {
+      "path": "package.json",
+      "status": "modified",
+      "beforeSha256Lf": "e282a9ae716f9b29153062c234f25868dd611e29e8628e0b459dc6593c6d9271",
+      "afterSha256Lf": "fad5cf49589a1c6747ccba4e473b53a0e90bb28fe4092281f5114f19852f60a5"
+    },
+    {
+      "path": "scenarios/broken-context-propagation/README.md",
+      "status": "modified",
+      "beforeSha256Lf": "963f3a34a3619f1e6b3565343e76513aa94102da8559f784504a8164ec1bbed2",
+      "afterSha256Lf": "b4d14ab5a9fafd7f36b70f46723e2768c54e3888b3e9a8f611d28145f3a18953"
+    },
+    {
+      "path": "scripts/run-local.ps1",
+      "status": "added",
+      "beforeSha256Lf": null,
+      "afterSha256Lf": "838af8c61606b9f011fb9c82f2f61dfb19c5b299bdcf3aec82a60938ab4f0fa1"
+    },
+    {
+      "path": "scripts/run-local.sh",
+      "status": "added",
+      "beforeSha256Lf": null,
+      "afterSha256Lf": "bfcdc10a1ed93547d6ea3e573b2c4c4fb210dc8c718094d3a37e2209a3a744e4"
+    },
+    {
+      "path": "scripts/verification-env.js",
+      "status": "added",
+      "beforeSha256Lf": null,
+      "afterSha256Lf": "ae399717099edddc4658de4b02895fa4c952b46e8c78b56932cd4c297b3d7b75"
+    },
+    {
+      "path": "scripts/verify-context.js",
+      "status": "added",
+      "beforeSha256Lf": null,
+      "afterSha256Lf": "f81b9baaad1c458dc0dc7c6fae11610de3e6e194734cfc8decd6eb28a34bb9d5"
+    },
+    {
+      "path": "scripts/verify-pipeline.js",
+      "status": "modified",
+      "beforeSha256Lf": "b6e888f147f2f48129d86cfa5e118ca6495f75309d4d601d9a16f647512b6d0e",
+      "afterSha256Lf": "af8b7c3dcc13632fa716cb1307835aeaa0024057c8d3ee14ed9f12192afa312e"
+    },
+    {
+      "path": "scripts/verify-signals.js",
+      "status": "modified",
+      "beforeSha256Lf": "aa85115c73c64e2d196dde47a3d01b2556a6617ace2dcf8d0122061e4b6ee7da",
+      "afterSha256Lf": "b13158acc1d70f29fe268d6ef851f2b642bcbc60ab1fb8c7449086138516992d"
+    },
+    {
+      "path": "test/fixtures/inspect-arguments.fixture",
+      "status": "added",
+      "beforeSha256Lf": null,
+      "afterSha256Lf": "10abcf5897b41810550a934799b29ecb448f03b892ec97b83f93c2826f58abb7"
+    },
+    {
+      "path": "test/fixtures/inspect-verification-env.fixture",
+      "status": "added",
+      "beforeSha256Lf": null,
+      "afterSha256Lf": "261f3d098efb25ff8c802f4df5c547c870bdf413a4800373f1bdf7ce8e45b9b8"
+    },
+    {
+      "path": "test/verification-env.test.js",
+      "status": "added",
+      "beforeSha256Lf": null,
+      "afterSha256Lf": "b2bf226c0acb69bedca92c4b7f84d9f720ebebf2af4fb5313dbbf25265b8ebb4"
+    },
+    {
+      "path": "test/verify-compose.test.js",
+      "status": "added",
+      "beforeSha256Lf": null,
+      "afterSha256Lf": "cafd74a55b6eef771b2bfc2fdbce8ed682bf1887265ccb638c748e95bcc5388e"
+    },
+    {
+      "path": "test/verify-context.test.js",
+      "status": "added",
+      "beforeSha256Lf": null,
+      "afterSha256Lf": "781cb0456c5d2f7076bdf56e3c957984305af19759320b2c3075871ce5d1e24f"
+    }
+  ]
+}

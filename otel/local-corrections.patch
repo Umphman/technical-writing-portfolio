@@ -1,0 +1,706 @@
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -158,25 +158,65 @@
+ 
+ ## Run it
+ 
+-Prerequisites: Docker Desktop with Compose v2; Node.js 24 for host checks.
+-
+-```bash
+-docker compose up -d --build --wait
+-docker compose stop loadgen
+-npm run verify:pipeline
+-```
+-
+-Without Docker:
+-
+-```bash
+-npm ci
+-npm test
+-npm run verify:signals
+-```
++Prerequisites: Node.js 24 and npm on `PATH`; Docker Desktop with Compose v2
++only for backend verification. Run these commands from this directory.
++
++Before running Node or npm, use the launcher for your shell. It removes inherited
++`OTEL_*`, `GRAFANA_CLOUD_*`, `COMPOSE_FILE`, Node preload/search-path/proxy controls,
++and npm's Node options for the command. Opening a new terminal alone does not clear inherited
++configuration. In particular, a signal-specific endpoint overrides a generic
++OTLP endpoint, and `NODE_OPTIONS` can load instrumentation before a script starts.
++The launchers leave the caller's environment unchanged. They preserve the
++intentional `COMPOSE_PROJECT_NAME`, `DEMO_HTTP_PORT`, and `PIPELINE_APP_URL`
++settings used for an isolated local stack.
++
++PowerShell:
++
++Check `Get-ExecutionPolicy -List` and `Get-ExecutionPolicy` before running a
++`.ps1` launcher. If the effective policy is `Restricted` and your organization
++permits local scripts, open a temporary session from this checkout with
++`powershell.exe -NoProfile -ExecutionPolicy RemoteSigned`, then continue below.
++`exit` closes that session; no persistent policy changes are needed. A process
++policy cannot override Group Policy. If it remains blocked, follow your
++organization's policy. See [PowerShell execution policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies).
++
++```powershell
++.\scripts\run-local.ps1 node --version
++.\scripts\run-local.ps1 npm ci --ignore-scripts
++.\scripts\run-local.ps1 npm test
++.\scripts\run-local.ps1 npm run verify:signals
++```
++
++POSIX shell:
++
++```sh
++sh scripts/run-local.sh node --version
++sh scripts/run-local.sh npm ci --ignore-scripts
++sh scripts/run-local.sh npm test
++sh scripts/run-local.sh npm run verify:signals
++```
++
++The version must be `v24.x`. Installation needs network access to the package
++registry; the signal check sends synthetic telemetry only to its own loopback
++receiver. It exits zero after three `verified ...` lines and `signal verification
++passed`. The launchers are environment controls, not a security sandbox.
++
++For actual backend receipt, start only the three required services, keeping the
++load generator out of the probe window. Use the same shell launcher for Docker
++so inherited identity settings do not change the expected resource attributes.
++
++```powershell
++.\scripts\run-local.ps1 docker compose -f docker-compose.yml up -d --build --wait lgtm alloy app
++.\scripts\run-local.ps1 npm run verify:pipeline
++```
++
++In a POSIX shell, replace `.\scripts\run-local.ps1` with `sh scripts/run-local.sh`.
+ 
+ `verify:pipeline` requires the running local stack and a stopped load generator.
+ It proves receiver and exporter activity, then queries the fresh probe in
+-Tempo, Loki, and Prometheus. `verify:signals` is the faster process-level check
++Tempo, Loki, and Prometheus. Both backend verifiers explicitly select this
++repository's `docker-compose.yml`, including when launched directly.
++`verify:signals` is the faster process-level check
+ against a bounded mock receiver; it does not validate Alloy or backend receipt.
+ 
+ Open [Grafana](http://localhost:3000), the [sample API](http://localhost:8080),
+diff --git a/docker-compose.yml b/docker-compose.yml
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -19,7 +19,7 @@
+       OTEL_METRIC_EXPORT_INTERVAL: "5000"
+       DEMO_SCENARIO: "normal"
+     ports:
+-      - "127.0.0.1:8080:8080"
++      - "127.0.0.1:${DEMO_HTTP_PORT:-8080}:8080"
+     depends_on:
+       alloy:
+         condition: service_started
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -15,7 +15,8 @@
+     "test": "node --test",
+     "verify:cloud-config": "node ./scripts/validate-cloud-env.js",
+     "verify:pipeline": "node ./scripts/verify-pipeline.js",
+-    "verify:signals": "node ./scripts/verify-signals.js"
++    "verify:signals": "node ./scripts/verify-signals.js",
++    "verify:context": "node ./scripts/verify-context.js"
+   },
+   "dependencies": {
+     "@opentelemetry/api": "1.9.1",
+diff --git a/scenarios/broken-context-propagation/README.md b/scenarios/broken-context-propagation/README.md
+--- a/scenarios/broken-context-propagation/README.md
++++ b/scenarios/broken-context-propagation/README.md
+@@ -6,42 +6,102 @@
+ context is not carried from checkout to inventory, one request is split into
+ unrelated traces and cross-signal investigation loses its causal thread.
+ 
+-## Run
++## Run and identify the failure
+ 
+-```bash
+-docker compose -f docker-compose.yml -f scenarios/broken-context-propagation/compose.override.yml down -v --remove-orphans
+-docker compose -f docker-compose.yml -f scenarios/broken-context-propagation/compose.override.yml up -d --wait lgtm alloy app
++Complete the [Node.js 24 installation and environment-isolation steps](../../README.md#run-it)
++first. Docker Desktop must be running. The commands below use PowerShell; in a
++POSIX shell, replace `.\scripts\run-local.ps1` with `sh scripts/run-local.sh`.
++
++The `down -v` commands delete this Compose project's local demonstration data.
++Use a dedicated checkout and project name; do not run them against a stack whose
++data you need to retain. The examples assume no `loadgen` or previous scenario is
++running in this project.
++
++If port 8080 is unavailable, choose another unused local port before starting
++either the broken or recovered stack. In PowerShell, run
++`$env:DEMO_HTTP_PORT = '18080'` and
++`$env:PIPELINE_APP_URL = 'http://127.0.0.1:18080'`; in a POSIX shell, run
++`export DEMO_HTTP_PORT=18080` and
++`export PIPELINE_APP_URL=http://127.0.0.1:18080`.
++Use the same values throughout the failure and recovery checks. The service
++continues to listen on port 8080 inside its container.
++
++```powershell
++.\scripts\run-local.ps1 docker compose -f docker-compose.yml -f scenarios/broken-context-propagation/compose.override.yml down -v --remove-orphans
++.\scripts\run-local.ps1 docker compose -f docker-compose.yml -f scenarios/broken-context-propagation/compose.override.yml up -d --build --wait lgtm alloy app
++.\scripts\run-local.ps1 npm run verify:context
+ ```
+ 
+-Open `http://localhost:3000`, choose the Tempo data source in Explore, and
+-inspect a recent checkout request.
++`verify:context` sends one checkout request with a unique identifier, then queries
++both returned trace IDs in Tempo. It waits up to 90 seconds for backend receipt.
++It exits zero only when the exact probe's `checkout.process` and
++`inventory.reserve` spans exist in separate traces with the expected service
++identity. Passing this command means the deliberately broken scenario was
++reproduced; it does **not** mean context propagation is healthy.
+ 
+-Starting only `lgtm`, `alloy`, and `app` keeps `loadgen` out of the evidence
+-window so the failure probe remains attributable.
++Expected output (identifiers vary):
+ 
+-## Observed local evidence
++```text
++probe: broken-context-<unique identifier>
++checkout trace: <32 hexadecimal characters>
++inventory trace: <different 32 hexadecimal characters>
++Tempo: checkout.process and inventory.reserve found in separate traces for this probe
++broken-context verification passed (the expected defect is present)
++```
++
++For visual inspection, open `http://localhost:3000`, choose **Explore** and the
++**Tempo** data source, and search by the printed checkout trace ID. The result
++contains `checkout.process` without `inventory.reserve`. Search the printed
++inventory trace ID: it contains `inventory.reserve` without `checkout.process`.
++These are two traces for the **same printed probe**, not unrelated recent traffic.
++
++If the verifier says the expected split is absent, check that you started both
++Compose files. If it reports backend timeout, inspect this project's services
++and logs:
++
++```powershell
++.\scripts\run-local.ps1 docker compose -f docker-compose.yml ps
++.\scripts\run-local.ps1 docker compose -f docker-compose.yml logs --tail 50 alloy lgtm
++```
++
++A response containing two trace IDs is insufficient proof that Tempo stored
++them. If the verifier reports a running load generator, stop it before retrying:
++
++```powershell
++.\scripts\run-local.ps1 docker compose -f docker-compose.yml stop loadgen
++```
++
++## Historical local evidence
+ 
+ - Checkout and inventory both returned successfully.
+ - Both operations emitted spans, but the backend returned two traces rather
+   than one connected checkout/inventory trace.
+ - The checkout and inventory logs carried different trace IDs.
+ 
+-The dated probe identifiers and backend results are in the [runtime verification
+-record](../../docs/evidence/runtime-verification.md).
++The September 2026 probe identifiers and backend results are in the [runtime
++verification record](../../docs/evidence/runtime-verification.md). They describe
++the earlier run, not a new execution of the corrected procedure above.
+ 
+ ## Diagnosis and recovery
+ 
+ Remove the two-file scenario stack and its volumes, start the default services
+ without `loadgen`, and run a fresh bounded verifier probe:
+ 
+-```bash
+-docker compose -f docker-compose.yml -f scenarios/broken-context-propagation/compose.override.yml down -v --remove-orphans
+-docker compose -f docker-compose.yml up -d --wait lgtm alloy app
+-npm run verify:pipeline
++```powershell
++.\scripts\run-local.ps1 docker compose -f docker-compose.yml -f scenarios/broken-context-propagation/compose.override.yml down -v --remove-orphans
++.\scripts\run-local.ps1 docker compose -f docker-compose.yml up -d --build --wait lgtm alloy app
++.\scripts\run-local.ps1 npm run verify:pipeline
+ ```
+ 
+-The recorded recovery returned checkout and inventory to one connected trace,
+-with the structured logs carrying that journey's trace ID.
++`verify:pipeline` sends a **new** identified checkout. Its final line must be
++`pipeline verification passed` and its exit status zero. It verifies a connected
++checkout/inventory trace, correlated logs in Loki, controlled metric deltas in
++Prometheus, and Alloy receipt/export activity. Inspect its printed trace ID in
++Tempo to see both operations in one trace. Do not reuse either failure trace ID:
++old split traces remain historical evidence, not evidence of recovery.
++
++The previously recorded September recovery returned checkout and inventory to
++one connected trace, with structured logs carrying that journey's trace ID.
+ 
+ ## Product implication
+ 
+diff --git a/scripts/run-local.ps1 b/scripts/run-local.ps1
+new file mode 100644
+--- /dev/null
++++ b/scripts/run-local.ps1
+@@ -0,0 +1,38 @@
++# Keep this a simple script. An advanced parameter block would intercept native
++# options such as Docker's -v and -d as PowerShell's -Verbose and -Debug.
++if ($args.Count -eq 0) {
++    $Executable = 'npm'
++    $CommandArgs = @('run', 'verify:signals')
++} else {
++    $Executable = [string]$args[0]
++    $CommandArgs = @($args | Select-Object -Skip 1)
++}
++
++$ErrorActionPreference = 'Stop'
++$savedEnvironment = @{}
++$originalLocation = Get-Location
++$commandExitCode = 1
++
++try {
++    # Clear these before npm or Node starts: clearing NODE_OPTIONS from
++    # JavaScript is too late to prevent an inherited preload from executing.
++    foreach ($entry in Get-ChildItem Env:) {
++        if ($entry.Name -match '^(OTEL_|GRAFANA_CLOUD_)|^(NODE_OPTIONS|NODE_PATH|NODE_USE_ENV_PROXY|npm_config_node_options|COMPOSE_FILE)$') {
++            $savedEnvironment[$entry.Name] = $entry.Value
++            Remove-Item -LiteralPath "Env:$($entry.Name)"
++        }
++    }
++    Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
++    if ($Executable -eq 'npm' -and $env:OS -eq 'Windows_NT') {
++        $Executable = 'npm.cmd'
++    }
++    & $Executable @CommandArgs
++    $commandExitCode = $LASTEXITCODE
++} finally {
++    Set-Location -LiteralPath $originalLocation.Path
++    foreach ($entry in $savedEnvironment.GetEnumerator()) {
++        Set-Item -LiteralPath "Env:$($entry.Key)" -Value $entry.Value
++    }
++}
++
++exit $commandExitCode
+diff --git a/scripts/run-local.sh b/scripts/run-local.sh
+new file mode 100644
+--- /dev/null
++++ b/scripts/run-local.sh
+@@ -0,0 +1,14 @@
++#!/bin/sh
++set -eu
++
++# Do this in the shell, before Node or npm can execute inherited preloads.
++# Only environment variable names are read; values are neither printed nor run.
++for verification_name in $(env | awk -F= 'toupper($1) ~ /^(OTEL_|GRAFANA_CLOUD_)|^(NODE_OPTIONS|NODE_PATH|NODE_USE_ENV_PROXY|NPM_CONFIG_NODE_OPTIONS|COMPOSE_FILE)$/ {print $1}'); do
++  unset "$verification_name"
++done
++
++cd "$(dirname "$0")/.."
++if [ "$#" -eq 0 ]; then
++  set -- npm run verify:signals
++fi
++exec "$@"
+diff --git a/scripts/verification-env.js b/scripts/verification-env.js
+new file mode 100644
+--- /dev/null
++++ b/scripts/verification-env.js
+@@ -0,0 +1,12 @@
++'use strict';
++
++// A generic OTLP endpoint does not override signal-specific endpoints. Remove
++// inherited configuration before adding the verification case's explicit values.
++function isolatedVerificationEnv(source = process.env) {
++  return Object.fromEntries(Object.entries(source).filter(([name]) => (
++    !/^(OTEL_|GRAFANA_CLOUD_)/iu.test(name)
++    && !/^(NODE_OPTIONS|NODE_PATH|NODE_USE_ENV_PROXY|npm_config_node_options|COMPOSE_FILE)$/iu.test(name)
++  )));
++}
++
++module.exports = { isolatedVerificationEnv };
+diff --git a/scripts/verify-context.js b/scripts/verify-context.js
+new file mode 100644
+--- /dev/null
++++ b/scripts/verify-context.js
+@@ -0,0 +1,71 @@
++'use strict';
++
++const assert = require('node:assert/strict');
++const { randomUUID } = require('node:crypto');
++const {
++  analyzeTempoTrace,
++  createDockerRunner,
++  fetchJson,
++  pollFor,
++  requireServices,
++  resolveDocker,
++  tempoTrace,
++} = require('./verify-pipeline');
++
++function assertSplit(checkout) {
++  const { checkoutTraceId, inventoryTraceId, contextPropagationHealthy } = checkout?.telemetry || {};
++  assert.match(checkoutTraceId || '', /^[0-9a-f]{32}$/u, 'Missing checkout trace ID.');
++  assert.match(inventoryTraceId || '', /^[0-9a-f]{32}$/u, 'Missing inventory trace ID.');
++  assert.notEqual(inventoryTraceId, checkoutTraceId, 'Expected the scenario to split the trace.');
++  assert.equal(contextPropagationHealthy, false, 'Expected the broken-context scenario.');
++  return { checkoutTraceId, inventoryTraceId };
++}
++
++async function runVerification() {
++  const runDocker = createDockerRunner(await resolveDocker());
++  await requireServices(runDocker);
++  const probeId = `broken-context-${randomUUID()}`;
++  const appUrl = process.env.PIPELINE_APP_URL || 'http://127.0.0.1:8080';
++  const checkout = await fetchJson(`${appUrl}/checkout`, {
++    method: 'POST',
++    headers: { 'content-type': 'application/json' },
++    body: JSON.stringify({
++      checkoutId: probeId,
++      items: [{ sku: 'context-verification', quantity: 1 }],
++    }),
++  });
++  const { checkoutTraceId, inventoryTraceId } = assertSplit(checkout);
++  process.stdout.write(`probe: ${probeId}\n`);
++  process.stdout.write(`checkout trace: ${checkoutTraceId}\n`);
++  process.stdout.write(`inventory trace: ${inventoryTraceId}\n`);
++
++  // Check the stored traces, not only the IDs echoed by the application.
++  const deadline = Date.now() + 90_000;
++  const checkoutTrace = await pollFor('checkout trace in Tempo', async () => {
++    const payload = await tempoTrace(runDocker, checkoutTraceId);
++    const result = analyzeTempoTrace(payload, probeId, ['checkout.process']);
++    return result.identityMatches && result.hasProbe && result.requiredSpansPresent
++      ? result : false;
++  }, deadline);
++  const inventoryTrace = await pollFor('inventory trace in Tempo', async () => {
++    const payload = await tempoTrace(runDocker, inventoryTraceId);
++    const result = analyzeTempoTrace(payload, probeId, ['inventory.reserve']);
++    return result.identityMatches && result.hasProbe && result.requiredSpansPresent
++      ? result : false;
++  }, deadline);
++  assert.equal(checkoutTrace.spanNames.includes('inventory.reserve'), false,
++    'The checkout trace unexpectedly contains the inventory operation.');
++  assert.equal(inventoryTrace.spanNames.includes('checkout.process'), false,
++    'The inventory trace unexpectedly contains the checkout operation.');
++  process.stdout.write('Tempo: checkout.process and inventory.reserve found in separate traces for this probe\n');
++  process.stdout.write('broken-context verification passed (the expected defect is present)\n');
++}
++
++module.exports = { assertSplit };
++
++if (require.main === module) {
++  runVerification().catch((error) => {
++    process.stderr.write(`${error?.stack || error}\n`);
++    process.exitCode = 1;
++  });
++}
+diff --git a/scripts/verify-pipeline.js b/scripts/verify-pipeline.js
+--- a/scripts/verify-pipeline.js
++++ b/scripts/verify-pipeline.js
+@@ -4,8 +4,10 @@
+ const { spawn } = require('node:child_process');
+ const fs = require('node:fs');
+ const path = require('node:path');
++const { isolatedVerificationEnv } = require('./verification-env');
+ 
+ const REPO_ROOT = path.resolve(__dirname, '..');
++const COMPOSE_CONFIG_PATH = path.join(REPO_ROOT, 'docker-compose.yml');
+ const APP_URL = process.env.PIPELINE_APP_URL || 'http://127.0.0.1:8080';
+ const ALLOY_URL = process.env.PIPELINE_ALLOY_URL || 'http://127.0.0.1:12345';
+ const VERIFY_TIMEOUT_MS = readPositiveInteger('PIPELINE_VERIFY_TIMEOUT_MS', 90_000);
+@@ -215,9 +217,16 @@
+ }
+ 
+ function createDockerRunner(docker) {
+-  return (args, options = {}) => runCommand(docker.command, args, {
++  // The verifier inspects the services started by this repository's runbook.
++  // Pin that file even when invoked directly from an inherited Compose shell.
++  const env = isolatedVerificationEnv(docker.env);
++  return (args, options = {}) => runCommand(docker.command, (
++    args[0] === 'compose'
++      ? ['compose', '-f', COMPOSE_CONFIG_PATH, ...args.slice(1)]
++      : args
++  ), {
+     ...options,
+-    env: docker.env,
++    env,
+   });
+ }
+ 
+@@ -441,8 +450,7 @@
+   ]));
+ }
+ 
+-function analyzeTempoTrace(tracePayload, probeId) {
+-  const requiredSpans = ['checkout.process', 'inventory.reserve'];
++function analyzeTempoTrace(tracePayload, probeId, requiredSpans = ['checkout.process', 'inventory.reserve']) {
+   const batches = Array.isArray(tracePayload?.batches)
+     ? tracePayload.batches
+     : (Array.isArray(tracePayload?.resourceSpans) ? tracePayload.resourceSpans : []);
+@@ -800,7 +808,19 @@
+   printSummary(report);
+ }
+ 
+-runVerification().catch((error) => {
+-  process.stderr.write(`${error?.stack || error}\n`);
+-  process.exitCode = 1;
+-});
++module.exports = {
++  analyzeTempoTrace,
++  createDockerRunner,
++  fetchJson,
++  pollFor,
++  requireServices,
++  resolveDocker,
++  tempoTrace,
++};
++
++if (require.main === module) {
++  runVerification().catch((error) => {
++    process.stderr.write(`${error?.stack || error}\n`);
++    process.exitCode = 1;
++  });
++}
+diff --git a/scripts/verify-signals.js b/scripts/verify-signals.js
+--- a/scripts/verify-signals.js
++++ b/scripts/verify-signals.js
+@@ -1,5 +1,6 @@
+ 'use strict';
+ 
++const { isolatedVerificationEnv } = require('./verification-env');
+ const CHILD_FLAG = '--verification-child';
+ const EXPECTED_PATHS = ['/v1/traces', '/v1/metrics', '/v1/logs'];
+ // Cold starts through a Windows bind mount can take longer while the local
+@@ -392,7 +393,7 @@
+   const child = spawn(process.execPath, [__filename, CHILD_FLAG, testCase.mode], {
+     cwd: repoRoot,
+     env: {
+-      ...process.env,
++      ...isolatedVerificationEnv(),
+       PORT: '0',
+       DEMO_SCENARIO: testCase.scenario,
+       OTEL_SERVICE_NAME: 'checkout-api',
+diff --git a/test/fixtures/inspect-arguments.fixture b/test/fixtures/inspect-arguments.fixture
+new file mode 100644
+--- /dev/null
++++ b/test/fixtures/inspect-arguments.fixture
+@@ -0,0 +1,3 @@
++'use strict';
++
++process.stdout.write(JSON.stringify(process.argv.slice(2)));
+diff --git a/test/fixtures/inspect-verification-env.fixture b/test/fixtures/inspect-verification-env.fixture
+new file mode 100644
+--- /dev/null
++++ b/test/fixtures/inspect-verification-env.fixture
+@@ -0,0 +1,12 @@
++'use strict';
++
++// Report names only, never inherited values.
++process.stdout.write(JSON.stringify({
++  unexpectedNames: Object.keys(process.env).filter((name) => (
++    /^(OTEL_|GRAFANA_CLOUD_)/iu.test(name)
++    || /^(NODE_OPTIONS|NODE_PATH|NODE_USE_ENV_PROXY|npm_config_node_options|COMPOSE_FILE)$/iu.test(name)
++  )),
++  project: process.env.COMPOSE_PROJECT_NAME,
++  port: process.env.DEMO_HTTP_PORT,
++  appUrl: process.env.PIPELINE_APP_URL,
++}));
+diff --git a/test/verification-env.test.js b/test/verification-env.test.js
+new file mode 100644
+--- /dev/null
++++ b/test/verification-env.test.js
+@@ -0,0 +1,96 @@
++'use strict';
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const { existsSync } = require('node:fs');
++const path = require('node:path');
++const { spawnSync } = require('node:child_process');
++const { isolatedVerificationEnv } = require('../scripts/verification-env');
++
++const root = path.resolve(__dirname, '..');
++const fixture = path.join(__dirname, 'fixtures', 'inspect-verification-env.fixture');
++const conflicting = {
++  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: 'http://127.0.0.1:9/unwanted-traces',
++  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: 'http://127.0.0.1:9/unwanted-metrics',
++  OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: 'http://127.0.0.1:9/unwanted-logs',
++  OTEL_EXPORTER_OTLP_HEADERS: 'test=unwanted',
++  OTEL_SDK_DISABLED: 'true',
++  OTEL_TRACES_SAMPLER: 'always_off',
++  GRAFANA_CLOUD_TOKEN: 'synthetic-test-value',
++  NODE_OPTIONS: '--require=./test/fixtures/nonexistent-preload.cjs',
++  NODE_PATH: '/nonexistent-verification-modules',
++  NODE_USE_ENV_PROXY: '1',
++  npm_config_node_options: '--require=./test/fixtures/nonexistent-npm-preload.cjs',
++  otel_verification_mixed_case: 'also-unwanted',
++  COMPOSE_FILE: '/nonexistent-verification-compose.yml',
++};
++const intended = {
++  COMPOSE_PROJECT_NAME: 'otel-verification-fixture',
++  DEMO_HTTP_PORT: '18080',
++  PIPELINE_APP_URL: 'http://127.0.0.1:18080',
++};
++const expectedChild = {
++  unexpectedNames: [],
++  project: intended.COMPOSE_PROJECT_NAME,
++  port: intended.DEMO_HTTP_PORT,
++  appUrl: intended.PIPELINE_APP_URL,
++};
++
++test('verification env removes inherited exporters, credentials and preloads without mutating its input', () => {
++  const input = { ...conflicting, ...intended, Path: 'system-search-path', TEMP: 'temporary-directory', SIGNAL_VERIFY_START_TIMEOUT_MS: '90000' };
++  const snapshot = { ...input };
++  assert.deepEqual(isolatedVerificationEnv(input), {
++    ...intended,
++    Path: 'system-search-path',
++    TEMP: 'temporary-directory',
++    SIGNAL_VERIFY_START_TIMEOUT_MS: '90000',
++  });
++  assert.deepEqual(input, snapshot);
++});
++
++test('verification env handles case-insensitive Windows variable names', () => {
++  assert.deepEqual(isolatedVerificationEnv({
++    otel_exporter_otlp_logs_endpoint: 'http://127.0.0.1:9',
++    Node_Options: '--require=missing',
++    NPM_CONFIG_NODE_OPTIONS: '--require=missing',
++    compose_file: '/nonexistent-verification-compose.yml',
++    keep: 'yes',
++  }), { keep: 'yes' });
++});
++
++test('PowerShell launcher clears configuration before Node can execute a preload', {
++  skip: process.platform !== 'win32',
++}, () => {
++  const result = spawnSync('powershell.exe', [
++    '-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File',
++    path.join(root, 'scripts', 'run-local.ps1'), process.execPath, fixture,
++  ], { cwd: root, env: { ...process.env, ...conflicting, ...intended }, encoding: 'utf8', windowsHide: true });
++  assert.equal(result.status, 0, result.stderr || result.error?.message);
++  assert.deepEqual(JSON.parse(result.stdout.trim()), expectedChild);
++});
++
++test('PowerShell launcher forwards native flags without consuming common-parameter abbreviations', {
++  skip: process.platform !== 'win32',
++}, () => {
++  const nativeArgs = ['compose', '-d', '-v', '-f', 'file with spaces.yml', '--wait', '--remove-orphans'];
++  const result = spawnSync('powershell.exe', [
++    '-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File',
++    path.join(root, 'scripts', 'run-local.ps1'), process.execPath,
++    path.join(__dirname, 'fixtures', 'inspect-arguments.fixture'), ...nativeArgs,
++  ], { cwd: root, env: process.env, encoding: 'utf8', windowsHide: true });
++  assert.equal(result.status, 0, result.stderr || result.error?.message);
++  assert.deepEqual(JSON.parse(result.stdout.trim()), nativeArgs);
++});
++
++const gitBash = 'C:\\Program Files\\Git\\bin\\bash.exe';
++test('POSIX launcher clears configuration before Node can execute a preload', {
++  skip: process.platform === 'win32' && !existsSync(gitBash),
++}, () => {
++  const toShellPath = (value) => value.replace(/\\/gu, '/');
++  const result = spawnSync(process.platform === 'win32' ? gitBash : 'sh', [
++    toShellPath(path.join(root, 'scripts', 'run-local.sh')),
++    toShellPath(process.execPath), toShellPath(fixture),
++  ], { cwd: root, env: { ...process.env, ...conflicting, ...intended }, encoding: 'utf8', windowsHide: true });
++  assert.equal(result.status, 0, result.stderr || result.error?.message);
++  assert.deepEqual(JSON.parse(result.stdout.trim()), expectedChild);
++});
+diff --git a/test/verify-compose.test.js b/test/verify-compose.test.js
+new file mode 100644
+--- /dev/null
++++ b/test/verify-compose.test.js
+@@ -0,0 +1,50 @@
++'use strict';
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs/promises');
++const os = require('node:os');
++const path = require('node:path');
++const { spawnSync } = require('node:child_process');
++const { createDockerRunner } = require('../scripts/verify-pipeline');
++
++// Compose config renders locally; these checks never contact the Docker daemon
++// or start containers. Keep npm test useful where the optional CLI is absent.
++const command = process.env.DOCKER_BIN || 'docker';
++const probe = spawnSync(command, ['compose', 'version'], {
++  encoding: 'utf8',
++  windowsHide: true,
++});
++const skip = probe.status !== 0 ? 'Docker Compose CLI is not available' : false;
++
++for (const conflict of ['missing file', 'different valid project']) {
++  test(`Compose verifier selects its stack with COMPOSE_FILE pointing to a ${conflict}`, { skip }, async (t) => {
++    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'otel-compose-test-'));
++    t.after(async () => {
++      assert.equal(path.dirname(directory), path.resolve(os.tmpdir()));
++      assert.ok(path.basename(directory).startsWith('otel-compose-test-'));
++      await fs.rm(directory, { recursive: true, force: true });
++    });
++    const conflictingFile = path.join(directory, 'unrelated.yml');
++    if (conflict === 'different valid project') {
++      await fs.writeFile(conflictingFile, 'services:\n  unrelated:\n    image: scratch\n');
++    }
++    const runner = createDockerRunner({
++      command,
++      env: {
++        ...process.env,
++        COMPOSE_FILE: conflictingFile,
++        COMPOSE_PROJECT_NAME: 'otel-verifier-test',
++        DEMO_HTTP_PORT: '18080',
++      },
++    });
++    const { stdout } = await runner(['compose', 'config', '--format', 'json']);
++    const config = JSON.parse(stdout);
++    assert.equal(config.name, 'otel-verifier-test');
++    assert.ok(config.services.app);
++    assert.ok(config.services.alloy);
++    assert.ok(config.services.lgtm);
++    assert.equal(config.services.unrelated, undefined);
++    assert.ok(config.services.app.ports.some((port) => port.published === '18080'));
++  });
++}
+diff --git a/test/verify-context.test.js b/test/verify-context.test.js
+new file mode 100644
+--- /dev/null
++++ b/test/verify-context.test.js
+@@ -0,0 +1,46 @@
++'use strict';
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const { assertSplit } = require('../scripts/verify-context');
++const { analyzeTempoTrace } = require('../scripts/verify-pipeline');
++
++const checkoutTraceId = 'a'.repeat(32);
++const inventoryTraceId = 'b'.repeat(32);
++const attribute = (key, value) => ({ key, value: { stringValue: value } });
++function trace(spans, namespace = 'otel-onboarding') {
++  return {
++    batches: [{
++      resource: { attributes: [
++        attribute('service.name', 'checkout-api'),
++        attribute('service.namespace', namespace),
++        attribute('service.version', '1.0.0'),
++        attribute('deployment.environment.name', 'local'),
++      ] },
++      scopeSpans: [{ spans: spans.map(([name, probe]) => ({
++        name, attributes: [attribute('checkout.id', probe)],
++      })) }],
++    }],
++  };
++}
++
++test('broken-context probe rejects healthy and uninstrumented responses', () => {
++  assert.throws(() => assertSplit({ telemetry: {
++    checkoutTraceId, inventoryTraceId: checkoutTraceId, contextPropagationHealthy: true,
++  } }), /split the trace/u);
++  assert.throws(() => assertSplit({}), /Missing checkout trace ID/u);
++  assert.deepEqual(assertSplit({ telemetry: {
++    checkoutTraceId, inventoryTraceId, contextPropagationHealthy: false,
++  } }), { checkoutTraceId, inventoryTraceId });
++});
++
++test('Tempo check requires the exact probe and service identity, not merely a span name', () => {
++  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'other-probe']]), 'target', ['checkout.process']).hasProbe, false);
++  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'target']], 'other-service'), 'target', ['checkout.process']).identityMatches, false);
++  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'target']]), 'target', ['checkout.process']).requiredSpansPresent, true);
++});
++
++test('normal pipeline still requires both operations in the returned trace', () => {
++  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'target']]), 'target').requiredSpansPresent, false);
++  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'target'], ['inventory.reserve', 'target']]), 'target').requiredSpansPresent, true);
++});

@@ -1,0 +1,17 @@
+{
+  "name": "technical-writing-portfolio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Authored technical writing excerpts, documentation maintenance cases, and supplementary runnable demonstrations.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "test": "node --test examples/auth/*.test.mjs examples/records/*.test.mjs",
+    "demo:auth": "node examples/auth/demo.mjs",
+    "demo:records": "node examples/records/demo.mjs",
+    "check:docs": "node scripts/check-docs.mjs",
+    "verify": "node scripts/verify.mjs"
+  }
+}
