@@ -3,7 +3,7 @@
   "baseRepository": "https://github.com/Umphman/otel-onboarding-experience-case-study",
   "baseCommit": "cc80d436d65e09854102ddb005d11a76bd2a9a60",
   "patchFile": "local-corrections.patch",
-  "patchSha256": "ee80252ec40d6a4596afe87d2fd220394151d8bcb4e19f698151aaf4b22d14f9",
+  "patchSha256": "e5d69a3141952b0fe16b05656025127ab9bca17444b1ffd41056ecbc3dc8c999",
   "fileHashNormalization": "UTF-8 bytes with CRLF and CR line endings normalized to LF",
   "files": [
     {
@@ -52,13 +52,13 @@
       "path": "scripts/verify-context.js",
       "status": "added",
       "beforeSha256Lf": null,
-      "afterSha256Lf": "f81b9baaad1c458dc0dc7c6fae11610de3e6e194734cfc8decd6eb28a34bb9d5"
+      "afterSha256Lf": "a9b258f43f5d22ef159ae186a27cba8718a857b18ee8d1e626353975b79b4c30"
     },
     {
       "path": "scripts/verify-pipeline.js",
       "status": "modified",
       "beforeSha256Lf": "b6e888f147f2f48129d86cfa5e118ca6495f75309d4d601d9a16f647512b6d0e",
-      "afterSha256Lf": "af8b7c3dcc13632fa716cb1307835aeaa0024057c8d3ee14ed9f12192afa312e"
+      "afterSha256Lf": "99859ae2607b7566b642609bd5145ab704bbf84d41e460179fdd7338004125b8"
     },
     {
       "path": "scripts/verify-signals.js",
@@ -94,7 +94,7 @@
       "path": "test/verify-context.test.js",
       "status": "added",
       "beforeSha256Lf": null,
-      "afterSha256Lf": "781cb0456c5d2f7076bdf56e3c957984305af19759320b2c3075871ce5d1e24f"
+      "afterSha256Lf": "f2bc8d441be6f0fbb2cfa70de5ab0ea99e53ccf18986310a31b807c2ef22f1c6"
     }
   ]
 }

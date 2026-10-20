@@ -314,19 +314,18 @@ diff --git a/scripts/verify-context.js b/scripts/verify-context.js
 new file mode 100644
 --- /dev/null
 +++ b/scripts/verify-context.js
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,64 @@
 +'use strict';
 +
 +const assert = require('node:assert/strict');
 +const { randomUUID } = require('node:crypto');
 +const {
-+  analyzeTempoTrace,
 +  createDockerRunner,
 +  fetchJson,
 +  pollFor,
 +  requireServices,
 +  resolveDocker,
-+  tempoTrace,
++  verifiedTempoTrace,
 +} = require('./verify-pipeline');
 +
 +function assertSplit(checkout) {
@@ -358,18 +357,12 @@ new file mode 100644
 +
 +  // Check the stored traces, not only the IDs echoed by the application.
 +  const deadline = Date.now() + 90_000;
-+  const checkoutTrace = await pollFor('checkout trace in Tempo', async () => {
-+    const payload = await tempoTrace(runDocker, checkoutTraceId);
-+    const result = analyzeTempoTrace(payload, probeId, ['checkout.process']);
-+    return result.identityMatches && result.hasProbe && result.requiredSpansPresent
-+      ? result : false;
-+  }, deadline);
-+  const inventoryTrace = await pollFor('inventory trace in Tempo', async () => {
-+    const payload = await tempoTrace(runDocker, inventoryTraceId);
-+    const result = analyzeTempoTrace(payload, probeId, ['inventory.reserve']);
-+    return result.identityMatches && result.hasProbe && result.requiredSpansPresent
-+      ? result : false;
-+  }, deadline);
++  const checkoutTrace = await pollFor('checkout trace in Tempo', () => (
++    verifiedTempoTrace(runDocker, checkoutTraceId, probeId, ['checkout.process'])
++  ), deadline);
++  const inventoryTrace = await pollFor('inventory trace in Tempo', () => (
++    verifiedTempoTrace(runDocker, inventoryTraceId, probeId, ['inventory.reserve'])
++  ), deadline);
 +  assert.equal(checkoutTrace.spanNames.includes('inventory.reserve'), false,
 +    'The checkout trace unexpectedly contains the inventory operation.');
 +  assert.equal(inventoryTrace.spanNames.includes('checkout.process'), false,
@@ -419,17 +412,272 @@ diff --git a/scripts/verify-pipeline.js b/scripts/verify-pipeline.js
    });
  }
  
-@@ -441,8 +450,7 @@
-   ]));
- }
+@@ -435,51 +444,187 @@
  
+ function attributesToObject(attributes) {
+   if (!Array.isArray(attributes)) return {};
+-  return Object.fromEntries(attributes.map((attribute) => [
+-    attribute.key,
+-    decodeAnyValue(attribute.value),
+-  ]));
+-}
+-
 -function analyzeTempoTrace(tracePayload, probeId) {
 -  const requiredSpans = ['checkout.process', 'inventory.reserve'];
-+function analyzeTempoTrace(tracePayload, probeId, requiredSpans = ['checkout.process', 'inventory.reserve']) {
-   const batches = Array.isArray(tracePayload?.batches)
-     ? tracePayload.batches
-     : (Array.isArray(tracePayload?.resourceSpans) ? tracePayload.resourceSpans : []);
-@@ -800,7 +808,19 @@
+-  const batches = Array.isArray(tracePayload?.batches)
+-    ? tracePayload.batches
+-    : (Array.isArray(tracePayload?.resourceSpans) ? tracePayload.resourceSpans : []);
++  const values = new Map();
++  for (const attribute of attributes) {
++    const value = decodeAnyValue(attribute.value);
++    // A conflicting duplicate must not supply a last-wins identity or probe.
++    values.set(attribute.key, values.has(attribute.key) && values.get(attribute.key) !== value
++      ? undefined : value);
++  }
++  return Object.fromEntries(values);
++}
++
++function normalizeTraceIdentifier(value, bytes) {
++  if (typeof value !== 'string') return null;
++  let hex;
++  if (new RegExp(`^[0-9a-f]{${bytes * 2}}$`, 'iu').test(value)) {
++    hex = value.toLowerCase();
++  } else {
++    // OTLP JSON uses hex; Tempo's protobuf JSON can encode bytes as base64.
++    // Buffer.from alone is too permissive: reject junk and noncanonical padding.
++    if (!/^[A-Za-z0-9+/_-]+={0,2}$/u.test(value)) return null;
++    const base64 = value.replace(/-/gu, '+').replace(/_/gu, '/');
++    const decoded = Buffer.from(base64, 'base64');
++    const canonical = decoded.toString('base64');
++    if (decoded.length !== bytes
++      || (base64 !== canonical && base64 !== canonical.replace(/=+$/u, ''))) return null;
++    hex = decoded.toString('hex');
++  }
++  return /^0+$/u.test(hex) ? null : hex;
++}
++
++function readSpanIdentifier(span, camelCase, snakeCase, bytes, parent = false) {
++  const values = [camelCase, snakeCase]
++    .filter((key) => Object.hasOwn(span, key))
++    .map((key) => span[key]);
++  if (parent && values.length === 0) return { valid: true, id: null };
++  const ids = values.map((value) => (
++    parent && value === '' ? null : normalizeTraceIdentifier(value, bytes)
++  ));
++  const valid = values.length > 0
++    && values.every((value, index) => (parent && value === '') || ids[index] !== null)
++    && ids.every((id) => id === ids[0]);
++  return { valid, id: valid ? ids[0] : null };
++}
++
++function analyzeAncestry(checkoutSpan, inventorySpan, spansById, probeId) {
++  const evidence = {
++    matched: false,
++    checkoutSpanId: checkoutSpan?.spanId || null,
++    inventorySpanId: inventorySpan?.spanId || null,
++    rootSpanId: null,
++    path: [],
++    reason: null,
++  };
++  if (!checkoutSpan || !inventorySpan) {
++    evidence.reason = 'Expected exactly one checkout and inventory span for this probe and trace.';
++    return evidence;
++  }
++  const visited = new Set();
++  let current = inventorySpan;
++  let reachedCheckout = false;
++  while (current) {
++    if (!current.validIds) {
++      evidence.reason = 'An ancestor has an invalid span or parent ID.';
++      return evidence;
++    }
++    if (visited.has(current.spanId)) {
++      evidence.reason = 'The parent chain contains a cycle.';
++      return evidence;
++    }
++    if (spansById.get(current.spanId)?.length !== 1) {
++      evidence.reason = 'The parent chain contains a duplicate span ID.';
++      return evidence;
++    }
++    if (!current.identityMatches
++      || (Object.hasOwn(current.attributes, 'checkout.id')
++        && current.attributes['checkout.id'] !== probeId)) {
++      evidence.reason = 'An ancestor belongs to a different service identity or probe.';
++      return evidence;
++    }
++    visited.add(current.spanId);
++    evidence.path.push({
++      name: current.name,
++      spanId: current.spanId,
++      parentSpanId: current.parentSpanId,
++    });
++    if (current === checkoutSpan) reachedCheckout = true;
++    if (!current.parentSpanId) {
++      evidence.rootSpanId = current.spanId;
++      break;
++    }
++    const parents = spansById.get(current.parentSpanId) || [];
++    if (parents.length !== 1) {
++      evidence.reason = parents.length
++        ? 'The parent chain contains a duplicate span ID.'
++        : 'A parent is missing from the expected trace.';
++      return evidence;
++    }
++    [current] = parents;
++  }
++  // Continue to the root after checkout so a cycle through/above checkout
++  // cannot turn a malformed graph into successful propagation evidence.
++  evidence.path.reverse();
++  evidence.matched = reachedCheckout && checkoutSpan !== inventorySpan;
++  evidence.reason = evidence.matched ? null : 'Inventory is not a descendant of the exact checkout span.';
++  return evidence;
++}
++
++function analyzeTempoTrace(
++  tracePayload,
++  probeId,
++  expectedTraceId,
++  requiredSpans = ['checkout.process', 'inventory.reserve'],
++) {
++  const traceId = typeof expectedTraceId === 'string' && /^[0-9a-f]{32}$/iu.test(expectedTraceId)
++    ? normalizeTraceIdentifier(expectedTraceId, 16) : null;
++  // Read every recognized collection so competing aliases cannot hide
++  // duplicate IDs that would make an otherwise plausible chain ambiguous.
++  const batches = ['batches', 'resourceSpans', 'resource_spans']
++    .flatMap((key) => (Array.isArray(tracePayload?.[key]) ? tracePayload[key] : []));
+   const groups = batches.map((batch) => {
+     const resource = attributesToObject(batch.resource?.attributes);
+-    const scopes = batch.scopeSpans || batch.scope_spans || [];
++    const scopes = ['scopeSpans', 'scope_spans']
++      .flatMap((key) => (Array.isArray(batch[key]) ? batch[key] : []));
+     const spans = scopes.flatMap((scope) => (Array.isArray(scope.spans) ? scope.spans : []));
+-    const spanDetails = spans.map((span) => ({
+-      name: span.name,
+-      attributes: attributesToObject(span.attributes),
+-    }));
+     const identityMatches = Object.entries(EXPECTED_IDENTITY).every(([key, expected]) => (
+       resource[key] === expected
+     ));
+-    const requiredSpansPresent = requiredSpans.every((name) => spanDetails.some((span) => (
+-      span.name === name && span.attributes['checkout.id'] === probeId
+-    )));
+-    return {
+-      resource,
+-      spans,
+-      spanDetails,
+-      identityMatches,
+-      hasProbe: spanDetails.some((span) => span.attributes['checkout.id'] === probeId),
+-      requiredSpansPresent,
+-    };
++    return { resource, identityMatches, spans: spans.map((span) => {
++      const spanTrace = readSpanIdentifier(span, 'traceId', 'trace_id', 16);
++      const spanId = readSpanIdentifier(span, 'spanId', 'span_id', 8);
++      const parent = readSpanIdentifier(span, 'parentSpanId', 'parent_span_id', 8, true);
++      return {
++        name: span.name,
++        attributes: attributesToObject(span.attributes),
++        traceId: spanTrace.id,
++        spanId: spanId.id,
++        parentSpanId: parent.id,
++        validIds: spanTrace.valid && spanId.valid && parent.valid,
++        identityMatches,
++      };
++    }) };
+   });
+-  const attributed = groups.find((group) => group.identityMatches && group.requiredSpansPresent);
+-  const identityGroup = attributed || groups.find((group) => group.identityMatches);
+   const allSpans = groups.flatMap((group) => group.spans);
++  const expectedSpans = traceId ? allSpans.filter((span) => span.traceId === traceId) : [];
++  const spansById = new Map();
++  for (const span of expectedSpans) {
++    if (!span.spanId) continue;
++    if (!spansById.has(span.spanId)) spansById.set(span.spanId, []);
++    spansById.get(span.spanId).push(span);
++  }
++  const probeSpans = expectedSpans.filter((span) => (
++    span.identityMatches && span.attributes['checkout.id'] === probeId
++  ));
++  const candidates = requiredSpans.map((name) => probeSpans.filter((span) => span.name === name));
++  const requiredSpansPresent = candidates.length > 0 && candidates.every((spans) => spans.length > 0);
++  const uniqueOperations = requiredSpansPresent && candidates.every((spans) => (
++    spans.length === 1 && spans[0].validIds && spansById.get(spans[0].spanId)?.length === 1
++  ));
++  const ancestryRequired = requiredSpans.includes('checkout.process')
++    && requiredSpans.includes('inventory.reserve');
++  const exactOperation = (name) => {
++    const matches = probeSpans.filter((span) => span.name === name);
++    return matches.length === 1 ? matches[0] : null;
++  };
++  const ancestry = ancestryRequired
++    ? analyzeAncestry(exactOperation('checkout.process'), exactOperation('inventory.reserve'), spansById, probeId)
++    : { matched: false, reason: 'Single-operation verification does not assert ancestry.', path: [] };
++  const identityGroup = groups.find((group) => group.identityMatches
++    && group.spans.some((span) => probeSpans.includes(span)));
+ 
+   return {
+     spanCount: allSpans.length,
+     spanNames: [...new Set(allSpans.map((span) => span.name))].sort(),
+     identity: identityGroup?.resource || {},
+-    identityMatches: Boolean(attributed),
+-    hasProbe: Boolean(attributed?.hasProbe),
+-    requiredSpansPresent: Boolean(attributed?.requiredSpansPresent),
++    identityMatches: requiredSpansPresent,
++    hasProbe: probeSpans.length > 0,
++    expectedTraceId: traceId,
++    traceIdMatches: requiredSpansPresent,
++    requiredSpansPresent,
++    ancestryRequired,
++    ancestry,
++    accepted: Boolean(traceId && uniqueOperations && (!ancestryRequired || ancestry.matched)),
+   };
+ }
+ 
+@@ -572,6 +717,13 @@
+   );
+ }
+ 
++async function verifiedTempoTrace(runDocker, traceId, probeId, requiredSpans) {
++  const payload = await tempoTrace(runDocker, traceId);
++  const analysis = analyzeTempoTrace(payload, probeId, traceId, requiredSpans);
++  return analysis.accepted && (!analysis.ancestryRequired || analysis.ancestry.matched)
++    ? analysis : false;
++}
++
+ async function lokiLogs(runDocker, query, startNanoseconds, endNanoseconds) {
+   return lgtmCurlJson(
+     runDocker,
+@@ -639,8 +791,12 @@
+   );
+   process.stdout.write(
+     `Tempo: spans=${report.backends.tempo.spanCount}, identity=${report.backends.tempo.identityMatches}, `
+-    + `probe=${report.backends.tempo.hasProbe}\n`,
++    + `probe=${report.backends.tempo.hasProbe}, expected-trace=${report.backends.tempo.traceIdMatches}, `
++    + `ancestry=${report.backends.tempo.ancestry.matched}\n`,
+   );
++  process.stdout.write(`Tempo parent chain: ${report.backends.tempo.ancestry.path.map(
++    (span) => `${span.name} (${span.spanId})`,
++  ).join(' -> ')}\n`);
+   process.stdout.write(
+     `Loki: records=${report.backends.loki.lines.length}, correlated=${report.backends.loki.matched}\n`,
+   );
+@@ -711,13 +867,9 @@
+       : false;
+   }, Date.now() + VERIFY_TIMEOUT_MS);
+ 
+-  const tempo = await pollFor('the exact trace in Tempo', async () => {
+-    const payload = await tempoTrace(runDocker, traceId);
+-    const analysis = analyzeTempoTrace(payload, probeId);
+-    return analysis.requiredSpansPresent && analysis.hasProbe && analysis.identityMatches
+-      ? analysis
+-      : false;
+-  }, Date.now() + VERIFY_TIMEOUT_MS);
++  const tempo = await pollFor('the exact trace and parent chain in Tempo', () => (
++    verifiedTempoTrace(runDocker, traceId, probeId)
++  ), Date.now() + VERIFY_TIMEOUT_MS);
+ 
+   const lokiQuery = [
+     '{service_name="checkout-api",service_namespace="otel-onboarding",deployment_environment_name="local"}',
+@@ -800,7 +952,20 @@
    printSummary(report);
  }
  
@@ -445,6 +693,7 @@ diff --git a/scripts/verify-pipeline.js b/scripts/verify-pipeline.js
 +  requireServices,
 +  resolveDocker,
 +  tempoTrace,
++  verifiedTempoTrace,
 +};
 +
 +if (require.main === module) {
@@ -657,32 +906,65 @@ diff --git a/test/verify-context.test.js b/test/verify-context.test.js
 new file mode 100644
 --- /dev/null
 +++ b/test/verify-context.test.js
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,262 @@
 +'use strict';
 +
 +const test = require('node:test');
 +const assert = require('node:assert/strict');
 +const { assertSplit } = require('../scripts/verify-context');
-+const { analyzeTempoTrace } = require('../scripts/verify-pipeline');
++const { analyzeTempoTrace, verifiedTempoTrace } = require('../scripts/verify-pipeline');
 +
 +const checkoutTraceId = 'a'.repeat(32);
 +const inventoryTraceId = 'b'.repeat(32);
++const probeId = 'target';
++const ids = {
++  root: '1111111111111111',
++  checkout: '2222222222222222',
++  client: '3333333333333333',
++  server: '4444444444444444',
++  inventory: '5555555555555555',
++  other: '6666666666666666',
++};
 +const attribute = (key, value) => ({ key, value: { stringValue: value } });
-+function trace(spans, namespace = 'otel-onboarding') {
++const base64 = (hex) => Buffer.from(hex, 'hex').toString('base64');
++function span(name, id, parent, probe, traceId = checkoutTraceId) {
 +  return {
-+    batches: [{
-+      resource: { attributes: [
-+        attribute('service.name', 'checkout-api'),
-+        attribute('service.namespace', namespace),
-+        attribute('service.version', '1.0.0'),
-+        attribute('deployment.environment.name', 'local'),
-+      ] },
-+      scopeSpans: [{ spans: spans.map(([name, probe]) => ({
-+        name, attributes: [attribute('checkout.id', probe)],
-+      })) }],
-+    }],
++    name,
++    traceId,
++    spanId: id,
++    ...(parent ? { parentSpanId: parent } : {}),
++    attributes: probe === undefined ? [] : [attribute('checkout.id', probe)],
 +  };
 +}
++function group(spans, namespace = 'otel-onboarding') {
++  return {
++    resource: { attributes: [
++      attribute('service.name', 'checkout-api'),
++      attribute('service.namespace', namespace),
++      attribute('service.version', '1.0.0'),
++      attribute('deployment.environment.name', 'local'),
++    ] },
++    scopeSpans: [{ spans }],
++  };
++}
++function trace(spans, namespace) {
++  return { batches: [group(spans, namespace)] };
++}
++function chain() {
++  return [
++    span('POST /checkout', ids.root),
++    span('checkout.process', ids.checkout, ids.root, probeId),
++    span('POST', ids.client, ids.checkout),
++    span('POST /inventory/reserve', ids.server, ids.client),
++    span('inventory.reserve', ids.inventory, ids.server, probeId),
++  ];
++}
++const analyze = (payload, requiredSpans) => (
++  analyzeTempoTrace(payload, probeId, checkoutTraceId, requiredSpans)
++);
++const query = (payload, requiredSpans) => verifiedTempoTrace(
++  async () => ({ stdout: JSON.stringify(payload) }), checkoutTraceId, probeId, requiredSpans,
++);
 +
 +test('broken-context probe rejects healthy and uninstrumented responses', () => {
 +  assert.throws(() => assertSplit({ telemetry: {
@@ -694,13 +976,196 @@ new file mode 100644
 +  } }), { checkoutTraceId, inventoryTraceId });
 +});
 +
-+test('Tempo check requires the exact probe and service identity, not merely a span name', () => {
-+  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'other-probe']]), 'target', ['checkout.process']).hasProbe, false);
-+  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'target']], 'other-service'), 'target', ['checkout.process']).identityMatches, false);
-+  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'target']]), 'target', ['checkout.process']).requiredSpansPresent, true);
++test('single-operation Tempo checks require the exact probe, identity and returned trace ID', async () => {
++  const checkout = span('checkout.process', ids.checkout, undefined, probeId);
++  assert.equal(analyze(trace([{ ...checkout, attributes: [attribute('checkout.id', 'other')] }]),
++    ['checkout.process']).hasProbe, false);
++  assert.equal(analyze(trace([checkout], 'other-service'), ['checkout.process']).identityMatches, false);
++  assert.equal(await query(trace([{ ...checkout, traceId: inventoryTraceId }]), ['checkout.process']), false);
++  const result = await query(trace([checkout]), ['checkout.process']);
++  assert.equal(result.accepted, true);
++  assert.equal(result.ancestryRequired, false);
++  assert.equal(result.ancestry.matched, false);
 +});
 +
-+test('normal pipeline still requires both operations in the returned trace', () => {
-+  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'target']]), 'target').requiredSpansPresent, false);
-+  assert.equal(analyzeTempoTrace(trace([['checkout.process', 'target'], ['inventory.reserve', 'target']]), 'target').requiredSpansPresent, true);
++test('split inventory trace passes only its expected ID without claiming ancestry', async () => {
++  const payload = trace([span('inventory.reserve', ids.inventory, undefined, probeId, inventoryTraceId)]);
++  const result = await verifiedTempoTrace(
++    async () => ({ stdout: JSON.stringify(payload) }), inventoryTraceId, probeId, ['inventory.reserve'],
++  );
++  assert.equal(result.accepted, true);
++  assert.equal(result.ancestryRequired, false);
++  assert.equal(await query(payload, ['inventory.reserve']), false);
++  assert.equal(await query(payload), false);
++});
++
++test('normal pipeline requires both operations and a proven parent chain', async () => {
++  const checkout = span('checkout.process', ids.checkout, undefined, probeId);
++  assert.equal(analyze(trace([checkout])).requiredSpansPresent, false);
++  assert.equal(await query(trace([checkout])), false);
++  const result = await query(trace([
++    checkout, span('inventory.reserve', ids.inventory, ids.checkout, probeId),
++  ]));
++  assert.equal(result.accepted, true);
++  assert.equal(result.ancestry.matched, true);
++  assert.deepEqual(result.ancestry.path.map((item) => item.spanId), [ids.checkout, ids.inventory]);
++});
++
++test('HTTP intermediates across resource and scope groups establish explicit ancestry', async () => {
++  const [root, checkout, client, server, inventory] = chain();
++  const first = group([root]);
++  first.scopeSpans.push({ spans: [checkout] });
++  const result = await query({ batches: [group([inventory]), group([client, server]), first] });
++  assert.equal(result.accepted, true);
++  assert.equal(result.expectedTraceId, checkoutTraceId);
++  assert.equal(result.ancestry.checkoutSpanId, ids.checkout);
++  assert.equal(result.ancestry.inventorySpanId, ids.inventory);
++  assert.equal(result.ancestry.rootSpanId, ids.root);
++  assert.deepEqual(result.ancestry.path.map((item) => item.spanId),
++    [ids.root, ids.checkout, ids.client, ids.server, ids.inventory]);
++});
++
++test('Tempo protobuf base64 and OTLP uppercase hex IDs normalize to the same parent chain', async () => {
++  const spans = chain().map((item, index) => ({
++    ...item,
++    traceId: index % 2 ? checkoutTraceId.toUpperCase() : base64(item.traceId),
++    spanId: index % 2 ? item.spanId : base64(item.spanId),
++    ...(item.parentSpanId ? { parentSpanId: base64(item.parentSpanId) } : { parentSpanId: '' }),
++  }));
++  const result = await query({ resourceSpans: [group(spans)] });
++  assert.equal(result.accepted, true);
++  assert.deepEqual(result.ancestry.path.map((item) => item.spanId), chain().map((item) => item.spanId));
++});
++
++test('protobuf snake-case fields and unpadded base64 IDs retain exact ancestry', async () => {
++  const spans = chain().map((item) => ({
++    name: item.name,
++    attributes: item.attributes,
++    trace_id: base64(item.traceId).replace(/=+$/u, ''),
++    span_id: base64(item.spanId).replace(/=+$/u, ''),
++    ...(item.parentSpanId ? { parent_span_id: base64(item.parentSpanId) } : {}),
++  }));
++  const batch = group([]);
++  delete batch.scopeSpans;
++  batch.scope_spans = [{ spans }];
++  assert.equal((await query({ resource_spans: [batch] })).accepted, true);
++});
++
++const brokenChains = [
++  ['missing inventory parent', (spans) => { delete spans[4].parentSpanId; }],
++  ['orphaned parent ID', (spans) => { spans[4].parentSpanId = ids.other; }],
++  ['missing intermediate span', (spans) => { spans.splice(3, 1); }],
++  ['sibling branch', (spans) => { spans[4].parentSpanId = ids.root; }],
++  ['reversed operation ancestry', (spans) => {
++    spans[1].parentSpanId = ids.inventory;
++    spans[4].parentSpanId = ids.root;
++  }],
++  ['cycle below checkout', (spans) => { spans[2].parentSpanId = ids.server; }],
++  ['self-parenting inventory', (spans) => { spans[4].parentSpanId = ids.inventory; }],
++  ['cycle through checkout', (spans) => { spans[1].parentSpanId = ids.inventory; }],
++  ['cycle above checkout', (spans) => { spans[0].parentSpanId = ids.root; }],
++  ['missing parent above checkout', (spans) => { spans[0].parentSpanId = ids.other; }],
++  ['other probe on intermediate span', (spans) => {
++    spans[2].attributes = [attribute('checkout.id', 'other')];
++  }],
++  ['other trace on intermediate span', (spans) => { spans[2].traceId = inventoryTraceId; }],
++  ['duplicate intermediate ID', (spans) => { spans.push({ ...spans[2] }); }],
++  ['duplicate checkout ID', (spans) => { spans.push({ ...spans[1], name: 'unrelated' }); }],
++  ['duplicate inventory ID', (spans) => { spans.push({ ...spans[4], name: 'unrelated' }); }],
++  ['duplicate operation with another span ID', (spans) => {
++    spans.push({ ...spans[1], spanId: ids.other });
++  }],
++  ['invalid inventory ID', (spans) => { spans[4].spanId = 'invalid'; }],
++  ['zero span ID', (spans) => { spans[4].spanId = '0'.repeat(16); }],
++  ['invalid parent ID', (spans) => { spans[4].parentSpanId = 'xyz'; }],
++  ['zero parent ID', (spans) => { spans[4].parentSpanId = '0'.repeat(16); }],
++  ['malformed base64 parent ID', (spans) => { spans[4].parentSpanId = `${base64(ids.server)}!`; }],
++  ['wrong-width base64 parent ID', (spans) => { spans[4].parentSpanId = base64(checkoutTraceId); }],
++  ['conflicting parent aliases', (spans) => { spans[4].parent_span_id = ids.root; }],
++  ['conflicting span aliases', (spans) => { spans[4].span_id = ids.other; }],
++];
++for (const [name, mutate] of brokenChains) {
++  test(`normal Tempo acceptance rejects ${name} despite matching operations/probe/identity`, async () => {
++    const spans = chain();
++    mutate(spans);
++    const payload = trace(spans);
++    const result = analyze(payload);
++    assert.equal(result.requiredSpansPresent, true);
++    assert.equal(result.hasProbe, true);
++    assert.equal(result.identityMatches, true);
++    assert.equal(result.accepted, false);
++    assert.equal(await query(payload), false, 'The pipeline query must enforce ancestry and valid IDs.');
++  });
++}
++
++test('a different service identity cannot supply a parent or operation', async () => {
++  const spans = chain();
++  assert.equal(await query({ batches: [group(spans.slice(0, 2)), group([spans[2]], 'other'),
++    group(spans.slice(3))] }), false);
++  assert.equal(await query({ batches: [group(spans.slice(0, 4)), group([spans[4]], 'other')] }), false);
++});
++
++test('a duplicate chain ID in another resource group remains ambiguous', async () => {
++  const spans = chain();
++  assert.equal(await query({ batches: [group(spans), group([{ ...spans[2] }], 'other')] }), false);
++});
++
++test('unrelated resources, other traces and duplicate IDs off the claimed chain do not establish or break it', async () => {
++  const spans = chain();
++  const unrelated = span('unrelated', ids.other);
++  const payload = { batches: [
++    group(spans),
++    group([unrelated, { ...unrelated }], 'other'),
++    group(spans.map((item) => ({ ...item, traceId: inventoryTraceId }))),
++  ] };
++  assert.equal((await query(payload)).accepted, true);
++});
++
++test('a same-name checkout for another probe is not the exact ancestor', async () => {
++  const spans = chain();
++  spans[1].attributes = [attribute('checkout.id', 'other')];
++  spans.push(span('checkout.process', ids.other, ids.root, probeId));
++  assert.equal(analyze(trace(spans)).requiredSpansPresent, true);
++  assert.equal(await query(trace(spans)), false);
++});
++
++test('omitted, malformed, zero or different expected trace IDs cannot accept a matching graph', async () => {
++  const payload = trace(chain());
++  for (const expected of [undefined, '', 'invalid', '0'.repeat(32), inventoryTraceId]) {
++    assert.equal(analyzeTempoTrace(payload, probeId, expected).accepted, false);
++  }
++  for (const returnedId of [undefined, 'invalid', '0'.repeat(32), inventoryTraceId]) {
++    const spans = chain().map((item) => ({ ...item, traceId: returnedId }));
++    assert.equal(await query(trace(spans)), false);
++  }
++});
++
++test('operation IDs are validated in single-operation verification as well', async () => {
++  const checkout = span('checkout.process', ids.checkout, undefined, probeId);
++  assert.equal(await query(trace([{ ...checkout, spanId: 'invalid' }]), ['checkout.process']), false);
++  assert.equal(await query(trace([checkout, { ...checkout }]), ['checkout.process']), false);
++});
++
++test('conflicting duplicate probe or identity attributes cannot win by ordering', async () => {
++  for (const reverse of [false, true]) {
++    const spans = chain();
++    const probes = [attribute('checkout.id', 'other'), attribute('checkout.id', probeId)];
++    spans[4].attributes = reverse ? probes.reverse() : probes;
++    assert.equal(await query(trace(spans)), false);
++    const payload = trace(chain());
++    const resources = payload.batches[0].resource.attributes;
++    resources.unshift(attribute('service.name', 'other'));
++    if (reverse) resources.reverse();
++    assert.equal(await query(payload), false);
++  }
++});
++
++test('competing collection aliases cannot hide a duplicate ID on the parent chain', async () => {
++  const spans = chain();
++  const payload = trace(spans);
++  payload.resourceSpans = [group([{ ...spans[2], parentSpanId: ids.root }])];
++  assert.equal(await query(payload), false);
++  const second = trace(chain());
++  second.batches[0].scope_spans = [{ spans: [{ ...spans[2], parentSpanId: ids.root }] }];
++  assert.equal(await query(second), false);
 +});

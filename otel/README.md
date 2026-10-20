@@ -79,7 +79,7 @@ sh scripts/run-local.sh npm test
 sh scripts/run-local.sh npm run verify:signals
 ```
 
-Check that Node prints `v24.x.x`. Expected: all applicable tests pass out of **31 total**, followed by three passing signal scenarios: explicit SDK, automatic instrumentation, and deliberately broken propagation. The audited Windows/Git Bash run passed 31/31. Platform-specific launcher tests and Docker CLI checks can skip when their prerequisites are unavailable. These signal checks use a local mock receiver; they do not establish receipt by Tempo, Loki, or Prometheus.
+Check that Node prints `v24.x.x`. Expected: all applicable tests pass out of **67 total**, followed by three passing signal scenarios: explicit SDK, automatic instrumentation, and deliberately broken propagation. The audited Windows/Git Bash run passed 67/67, including adversarial span-ancestry checks. Platform-specific launcher tests and Docker CLI checks can skip when their prerequisites are unavailable. These signal checks use a local mock receiver; they do not establish receipt by Tempo, Loki, or Prometheus.
 
 ## Establish the healthy baseline
 
@@ -99,11 +99,13 @@ sh scripts/run-local.sh docker compose -f docker-compose.yml up -d --build --wai
 sh scripts/run-local.sh npm run verify:pipeline
 ```
 
-Expected: app and LGTM become healthy, Alloy is running, the verifier prints a new probe and trace ID, and the last line is `pipeline verification passed` with exit status **0**. It checks Alloy receipt/export activity, the connected trace in Tempo, correlated logs in Loki, and request/duration metric deltas in Prometheus. Image downloads and startup take longer than the process tests.
+Expected: app and LGTM become healthy, Alloy is running, the verifier prints a new probe and trace ID, and the last line is `pipeline verification passed` with exit status **0**. It checks Alloy receipt/export activity, the stored span ancestry in Tempo, correlated logs in Loki, and request/duration metric deltas in Prometheus. Image downloads and startup take longer than the process tests.
 
 ## Understand the context boundary
 
-A span describes an operation; its trace ID ties it to the other operations in the same journey. In normal mode, HTTP instrumentation carries the active checkout context into the inventory request, so `checkout.process` and `inventory.reserve` share a trace ID.
+A span describes an operation. Its trace ID identifies the trace it belongs to; its parent span ID identifies the operation that encloses it. In normal mode, HTTP instrumentation carries the active checkout context into the inventory request, placing `inventory.reserve` below `checkout.process` through intermediate HTTP spans.
+
+The verifier checks those stored parent links, the expected trace ID, and the exact probe and service identity. The inventory span's ancestor chain must reach the checkout span. Merely finding both operation names in one trace does not establish that relationship.
 
 This demo makes an HTTP request back to another endpoint in the **same Node.js application**. It models a context boundary without requiring two separately deployed services.
 
@@ -191,7 +193,7 @@ sh scripts/run-local.sh docker compose -f docker-compose.yml up -d --build --wai
 sh scripts/run-local.sh npm run verify:pipeline
 ```
 
-Require a **new** probe ID, a connected trace, and `pipeline verification passed` with exit status **0**. Search the new trace ID in Tempo: both operations must appear in one trace. Neither an old successful trace nor the earlier split traces prove recovery.
+Require a **new** probe ID, a verified parent chain from inventory back to checkout, and `pipeline verification passed` with exit status **0**. Search the new trace ID in Tempo: both operations must appear in one trace, with inventory descending from checkout through the HTTP spans. Neither trace-ID equality nor an old successful trace proves recovery.
 
 ## If a check fails
 
@@ -201,6 +203,7 @@ Require a **new** probe ID, a connected trace, and `pipeline verification passed
 | Application host port 18080 is unavailable | Choose an unused host port; change both `DEMO_HTTP_PORT` and the port in `PIPELINE_APP_URL`, then recreate the stack. Keep the internal container port unchanged. |
 | Port 3000, 12345, or 4318 is unavailable | Free the required port if you control the conflicting service, or run the tutorial on another local machine with these ports available. Changing the application port does not move these listeners. |
 | Expected split is absent | Confirm the startup command includes both Compose files. This check should fail against a healthy stack. |
+| Both operations appear, but ancestry verification fails | Inspect the parent links for missing spans or an unrelated chain. Confirm the complete path was exported, then rerun with a fresh probe. Trace-ID equality alone is insufficient. |
 | Tempo receipt times out | Run the status and log commands below. Application success alone does not establish backend receipt. |
 | Verifier detects `loadgen` | Use the stop command for your shell below, then rerun the probe. |
 | Exporter failure-counter series are unavailable | Preserve that limitation in the result. Missing counters do not prove zero failures. |

@@ -25,62 +25,58 @@ The combined suite contains **24 tests**. No dependency installation, credential
 
 ## Corrected OpenTelemetry tutorial
 
-Verification used an isolated copy of public commit `cc80d436d65e09854102ddb005d11a76bd2a9a60` plus the [local correction patch](otel/local-corrections.patch). The public repository was not changed. The [tutorial](otel/README.md) supplies the exact setup, failure, recovery, and cleanup commands.
+Verification used public commit `cc80d436d65e09854102ddb005d11a76bd2a9a60` plus the [correction patch](otel/local-corrections.patch). The separate upstream repository is unchanged. The [tutorial](otel/README.md) supplies setup, failure, recovery, and cleanup commands; the [manifest](otel/correction-manifest.json) records the patch and file hashes.
 
-Environment: Windows, Node.js **24.21.0**, npm **10.9.3**, Docker **29.8.0**, Compose **5.5.1**, Linux containers. Dependencies came from the committed lockfile, with package lifecycle scripts disabled during installation. The test project used host port **18080** because port 8080 could not be bound on this machine.
+Environment: Windows, Node.js **24.21.0**, npm **10.9.3**, Docker **29.8.0**, Compose **5.5.1**, Linux containers. The disposable project used application port **18080** and no hosted credentials. Dependencies use the committed lockfile, with package lifecycle scripts disabled.
+
+### What changed after review
+
+The earlier verifier found the expected operations in one stored trace but did not check their parent relationship. Independent review exposed that gap. Normal and recovery checks now require the exact probe, service identity, expected trace ID, and an unambiguous parent chain from inventory through checkout to the root. They reject missing parents, unrelated branches, cycles, and conflicting identifiers or relevant attributes on that path. Split-trace checks validate each operation's separate stored trace; they do not claim ancestry between the two traces.
+
+The following results cover the strengthened validator:
 
 | Check | Result |
 | --- | --- |
-| Node.js test suite | 31 passed, zero failed, zero skipped on the tested Windows/Git Bash environment |
-| Explicit SDK with mock OTLP receiver | Passed for trace, metric, and log export; structured logs correlated |
-| Configured automatic instrumentation with mock receiver | Passed for trace, metric, and log export; structured logs correlated |
-| Deliberately broken propagation with mock receiver | Passed: the expected context split was observed |
-| Environment isolation | All three signal scenarios passed with conflicting inherited endpoints, headers, SDK disabling, sampling, and propagation settings |
-| PowerShell and POSIX launchers | Passed invalid-preload checks before Node/npm startup; PowerShell argument-forwarding regression passed; POSIX launcher exercised using Git Bash on Windows |
-| Compose-file selection | Actual Compose configuration checks passed with inherited files pointing to a nonexistent path and an unrelated valid project; both launchers and the shared verifier selected the intended checkout |
-| Windows script-policy prerequisite | The audit reproduced the `Restricted` block. A temporary `RemoteSigned` child process ran the launcher and backend sequence under a restricted parent; no saved policy was changed |
-| Healthy local pipeline | Passed: Alloy activity, connected Tempo trace, correlated Loki records, and Prometheus metric deltas |
-| Broken-context local pipeline | Passed: a new identified checkout produced two distinct traces, both retrieved from Tempo with the expected probe, service identity, and separate operations |
-| Recovery | Passed with a fresh checkout probe after recreating the default stack |
-| Negative control | The broken-context verifier correctly rejected the healthy stack with exit 1 |
-| Patch portability | `git apply --check` and application passed against a fresh baseline; all 67 resulting source files matched the corrected copy after LF normalization |
+| OTel test suite | **67 passed**, zero failures or skips; includes 39 focused context/trace checks plus application, launcher, environment-isolation, and Compose-selection regressions |
+| Adversarial ancestry fixtures | Valid intermediate paths pass; orphaned, unrelated, cyclic, ambiguous, or incorrectly attributed paths fail. Hexadecimal and Tempo base64 identifiers are covered. |
+| Mock OTLP receiver | Explicit SDK, automatic instrumentation, and deliberate broken propagation passed; these process checks establish export to the mock receiver. |
+| Healthy backend and fresh recovery | Expected trace and five-span ancestry path verified in Tempo; three correlated Loki records and request/duration metric deltas of one on each run; Alloy receipt/export and processor activity observed |
+| Intentional failure | Both exact probe traces retrieved from Tempo with their separate operations and expected identity |
+| Negative control | The split-trace verifier rejected the healthy stack with the expected error and exit 1 |
+| Patch portability | Applied cleanly to a fresh pinned baseline; all 67 resulting source files matched the corrected copy after LF normalization |
+| Cleanup | Zero remaining containers, volumes, or networks for the disposable verification project |
 
-The 31 tests include ten added checks for environment isolation, argument forwarding, Compose-file selection, and split-trace validation. Process-level signal checks used a local mock receiver earlier on the same date. The final setup pass reran the full test suite and backend failure/recovery sequence using the corrected Compose selection.
+Fresh backend observations on 20 October 2026:
 
-The final backend run used a nonexistent inherited `COMPOSE_FILE`, a parent process with `Restricted` script policy, and temporary `RemoteSigned` child processes. It used a separate disposable Compose project with Alloy, Tempo, Loki, and Prometheus; no hosted telemetry destination or paid provider was used. Cleanup removed that project's containers, volumes, and network.
-
-These are the final backend observations from 20 October 2026:
-
-| Stage | Probe | Result |
+| Stage | Probe | Stored trace evidence |
 | --- | --- | --- |
-| Baseline | `pipeline-20261020162521-acd727bf` | Connected trace `051e841b5406650fc8ff6133da95248c`; three correlated log records; request and duration counts each increased by one |
-| Intentional failure | `broken-context-460b8295-dad9-4b14-a6bb-2db209e5cc24` | Checkout trace `dd5e6bf9063a2c77170ab598b2e75147`; inventory trace `4b4bd4dccfd15dbff17532eb8610cd71`; both stored in Tempo |
-| Recovery | `pipeline-20261020162807-6f9a5364` | Connected trace `24b8a4693fd56771644cb8feb491ebde`; three correlated log records; request and duration counts each increased by one |
+| Baseline | `pipeline-20261020181336-006cad49` | `81777072ff53cc41129b64d9e0a8ac1a`; parent chain verified |
+| Intentional failure | `broken-context-198696cd-16aa-4643-a063-6bce70c5fa14` | Checkout `1064c0ae494affb7f6e2bf5f14c29156`; inventory `27f866e8fd5911f9244c13fd9fa4468d` |
+| Recovery | `pipeline-20261020181759-2dbb8a9f` | `458a62a5c82210c4524bc3bf417133b6`; new parent chain verified |
 
-Alloy exporter failure-counter series were unavailable in the baseline and recovery runs. This is a limitation, not evidence of zero exporter failures. Earlier bad-endpoint and other scenario observations remain in the public project's [dated evidence record](https://github.com/Umphman/otel-onboarding-experience-case-study/blob/cc80d436d65e09854102ddb005d11a76bd2a9a60/docs/evidence/runtime-verification.md); they were not all rerun.
+Baseline and recovery both established this stored path, with different span IDs on each run:
 
-The patch and its individual source-file hashes are recorded in the [correction manifest](otel/correction-manifest.json). The causal explanation was compared with the application's context-reset code, and the Grafana inspection steps were checked against its official trace-ID query instructions; this pass did not exercise the UI interactively. Linux/macOS execution and hosted export were not tested. Local passing checks do not establish production readiness or usability with an independent reader.
+`HTTP server → checkout.process → HTTP client → HTTP server → inventory.reserve`
+
+The sequence ran with an inherited nonexistent `COMPOSE_FILE`, which the launchers cleared. Earlier setup checks on the same date also exercised the documented temporary PowerShell `RemoteSigned` session under a restricted parent; no saved execution policy was changed.
+
+Alloy exporter failure-counter series were unavailable. That is not evidence of zero exporter failures. This run did not exercise Grafana's UI interactively, native Linux/macOS launchers, hosted export, or private deployments. The UI instructions were checked against official documentation. Earlier scenarios in the upstream project's [dated evidence record](https://github.com/Umphman/otel-onboarding-experience-case-study/blob/cc80d436d65e09854102ddb005d11a76bd2a9a60/docs/evidence/runtime-verification.md) retain their original scope.
 
 ## Editorial and disclosure review
 
-The three selected samples feature existing authored documentation: public OpenTelemetry writing, an anonymized behavior-reference excerpt, and an audience and editing case with a substantive historical FAQ revision. A supporting observability excerpt also comes from an existing private guide. The author confirmed original authorship across the repositories and AI-assisted refinement and maintenance as development progressed.
+The selected samples derive from documentation I authored for Raster/Sonar and the separate public OpenTelemetry case study. New portfolio edits and fictional exercises are labeled. Codex performed the preparation comparisons and checks below; the [AI workflow](AI-WORKFLOW.md) explains its contribution and my review responsibilities.
 
-The integration excerpt was compared with its original guide, relevant implementation, and existing test assertions; private tests were not rerun. The FAQ before and after were checked in Git history. Retained passages explaining proposal authority and research memory were checked against their original documents. The AI workflow includes a commit that updates implementation, the operator guide, and the documentation index together. These are source and provenance checks, not a fresh assessment of private runtime behavior.
+| Evidence | Review scope |
+| --- | --- |
+| Saved-item reference | Compared with the original guide, implementation, request validation, and existing test assertions. Private services and databases were not executed. |
+| Historical FAQ and new portfolio edit | Checked the original quotations in Git history and the implementation-status guide from the same milestone. The new edit is explicitly separate from the historical wording. |
+| Audience and research-authority excerpts | Compared with the engineering, reader-facing, architecture, research-memory, and code-based diligence guides. The diligence map is a technical document; no particular investor receipt or investment decision is inferred. |
+| Maintenance examples | Checked revisions that update implementation, operating guidance, and the canonical index, plus the cross-service ownership explanation. These establish the documented changes, not a particular historical AI error or its discoverer. |
+| Working practices | My account establishes staff-writer review, code/comment audits, approval responsibilities, GitHub tracking and ownership, and PM/executive prioritization based on blocked parties. |
+| Evaluation | My account establishes qualitative customer/investor interviews and feature API usage/adoption comparisons before and after documentation changes. No transcripts, analytics exports, specific results, or documentation-only causal effects are claimed. |
 
-The case also contains a clearly labeled new portfolio revision checked against the historical implementation-status guide. Additional excerpts from the existing reader-facing explainer and code-based due-diligence map demonstrate how the writing explains evidence and limits. The diligence map is identified as a technical document; its inclusion does not imply that it was an investor brochure or that a particular recipient received it.
+Historical excerpts describe their dated source snapshots. They do not certify the current private deployment. Specific coaching episodes and measured team improvements are not established by the documented ownership practices.
 
-The author confirmed internal editorial review by staff writers, UAT conducted as qualitative interviews with selected customers and investors, and revision prioritization with executives and PMs based on blocked parties. The author also confirmed that interview feedback and API usage/adoption telemetry for the relevant features were benchmarked before and after documentation changes. This establishes the reported evaluation method; no interview transcripts, analytics exports, comparison values, or specific results are included in the portfolio. The account does not establish that documentation alone caused any change in adoption.
+Disclosure review checks retained text for private identifiers, paths, credentials, schemas, routes, commercial rules, research methods, and customer information. Authored quotations are deliberately retained after content review; exact overlap alone is not treated as a disclosure. Raster/Sonar attribution and my professional name are included with my authorization. Private source mappings and audit records remain outside this repository.
 
-During team development, developers supplied code comments; the author audited the code and comments, created documentation, and reviewed, changed, and approved it. These workflow details come from the author's account. They are not inferred from commits, and they do not establish a specific project duration or investment outcome.
-
-The author also confirmed GitHub-based documentation tracking, versioning, and ownership practices that provided attribution and a shareable record of current documentation status. The portfolio describes this as a team practice. It does not infer individual coaching sessions, specific GitHub enforcement mechanisms, automated status checks, or measured improvements in team performance.
-
-The author also described checking related services across the stack when Codex-assisted edits began from a single repository. A historical documentation revision corroborates the distinction between a data-producing backend, the AI service's run/progress ownership, and frontend presentation. It supports the example's content, not a claim that the record captures a particular AI error or the person who identified it.
-
-The two supplementary executable tutorials use newly invented applications and data. The OTel project also uses its existing synthetic checkout workload. Review checked the complete portfolio for private paths, production identifiers, credentials, internal schemas and routes, commercial rules, research methods, unsupported outcomes, and misleading attribution.
-
-Retained wording from authored private documentation is intentional. Exact-phrase matches are reviewed for their content and recorded separately from potential disclosures; rewriting every sentence until it no longer matches would erase the samples' provenance. The source mappings and review records remain outside the candidate publication directory.
-
-Automated pattern checks and separate Codex review passes support this assessment. The author remains responsible for the selected excerpts and the scope of their public disclosure.
-
-The corrected OTel procedure adds the missing checkout request, explains the context reset, verifies the exact split traces, and requires fresh recovery evidence. Its launchers replace the ambiguous instruction to use a clean terminal, isolate inherited Compose-file selection, and document the Windows script-policy prerequisite. These fixes are included in this portfolio and verified above; the pinned upstream repository has not been changed.
+Pattern scans and Codex review passes are bounded checks, not guarantees. I remain responsible for the documentation and its public disclosure.

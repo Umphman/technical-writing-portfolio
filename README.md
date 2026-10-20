@@ -1,52 +1,47 @@
 # Technical writing portfolio
 
-By **Umphman**.
+By **Michael Gomez Wood** (**Umphman** on GitHub).
 
-I write documentation for the Raster/Sonar ecosystem, spanning a frontend application, an AI service, a calculation backend, and a subscription service. My audiences include developers and operators, internal project managers and executives, technical and nontechnical customers, and investors reviewing the project for due diligence.
+I write documentation across the Raster/Sonar ecosystem: a frontend application, an AI service, a calculation backend, and a subscription service. My readers include developers, operators, PMs and executives, technical and nontechnical customers, and investors conducting due diligence.
 
-Two of the three selections below adapt my Raster/Sonar documentation; the other comes from my separate public OpenTelemetry case study. Together they show technical explanation, substantive editing, and precise behavioral reference. I authored the original documentation with AI assistance for refinement and maintenance; new portfolio adaptations are identified.
+The first two samples adapt my Raster/Sonar documentation; the third comes from my separate public OpenTelemetry case study. I authored the originals with AI assistance for refinement and maintenance. New portfolio edits are labeled.
 
-Raster and Sonar identify the source ecosystem. The excerpts retain anonymized feature names and omit private repository links, customer information, and proprietary implementation details.
+The excerpts anonymize feature names and omit private links, customer information, and proprietary implementation details.
 
 ## Three selected samples
 
-### Explain and troubleshoot OpenTelemetry onboarding
-
-[Read the selected passages and investigation](samples/observability-onboarding.md).
-
-- **Source:** my separate public OpenTelemetry case study.
-- **Intended reader:** developers choosing instrumentation and operators investigating missing telemetry.
-- **Problem:** automatic instrumentation has limits, and a healthy application can still have a broken telemetry pipeline.
-- **Contribution:** original instrumentation comparison and failure investigation, plus an expanded [runnable tutorial](otel/README.md) prepared during portfolio review.
-- **Validation:** local tests and backend failure/recovery checks passed; [results and scope](VERIFICATION.md#corrected-opentelemetry-tutorial).
-
 ### Explain AI proposals without implying execution authority
 
-[Read the audience adaptations, review process, and historical before-and-after edit](case-studies/maintaining-documentation-across-services.md).
+[Read the before-and-after edit and cross-service writing case](case-studies/maintaining-documentation-across-services.md).
 
-- **Source:** my Sonar research-platform documentation, with documentation-maintenance guidance from Raster; anonymized excerpts and revisions.
-- **Intended reader:** PMs and customers understanding strategies, AI proposals, and research memory; reviewers assessing evidence and readiness for due diligence.
-- **Problem:** developer-oriented explanations need different depth for different audiences; “cannot tune automatically” obscures the distinction between useful analysis and permission to apply changes.
-- **Contribution:** original explanations, editorial review and approval, and ongoing maintenance; evaluation included interviews and feature usage/adoption comparisons before and after documentation changes.
-- **Validation:** historical wording and implementation status checked against source and Git history; the collaboration process comes from my account.
+- **Source:** Sonar research-platform guides and Raster maintenance guidance; June–September 2026 snapshots.
+- **Reader:** PMs, customers, and due-diligence reviewers.
+- **Contribution:** original explanations, editorial review, and maintenance; a new edit separates available analysis, planned automation, and permission to apply changes.
+- **Validation:** source and Git-history comparison; collaboration and evaluation methods are my account.
 
 ### Specify rename, reset, and no-change behavior
 
 [Read the saved-item display-name reference excerpt](samples/saved-item-display-names.md).
 
-- **Source:** my frontend integration guide for Raster's subscription service; an anonymized behavioral reference.
-- **Intended reader:** a frontend engineer implementing an edit form.
-- **Problem:** omitted, null, and empty values have different consequences.
-- **Contribution:** original integration guide, with source-checked clarification added for this adaptation.
-- **Validation:** source and existing test assertions reviewed; private services were not executed.
+- **Source:** my frontend integration guide for Raster's subscription service.
+- **Reader:** a frontend engineer implementing an edit form.
+- **Contribution:** original reference; this adaptation clarifies the different consequences of omitted, null, and empty values.
+- **Validation:** source and existing test assertions reviewed; no private service execution.
+
+### Explain and troubleshoot OpenTelemetry onboarding
+
+[Read the selected passages and investigation](samples/observability-onboarding.md), then try the [runnable tutorial](otel/README.md).
+
+- **Source:** my separate public OpenTelemetry case study.
+- **Reader:** developers choosing instrumentation and operators investigating missing telemetry.
+- **Contribution:** original instrumentation comparison and failure investigation, plus a tutorial expanded during portfolio review.
+- **Validation:** local tests and backend failure/recovery checks; [results and scope](VERIFICATION.md#corrected-opentelemetry-tutorial).
 
 ## How I maintain documentation
 
-GitHub tracking, versioning, and ownership practices provided a shareable record of documentation status and attribution for the team.
+The [AI workflow](AI-WORKFLOW.md) shows my review across services and how implementation changes affect an operator guide and its canonical index. The writing case describes team review, GitHub tracking and ownership, and evaluation through interviews and API telemetry.
 
-The [AI workflow](AI-WORKFLOW.md) draws on my Raster/Sonar documentation work. It explains my review across services, shows how implementation changes affect an operator guide and its canonical index, and records how claims were checked during portfolio preparation.
-
-The supporting [observability excerpt](samples/observability-signal-coverage.md), adapted from my Raster AI-service guide, helps operators choose between metrics, logs, reports, and deployment evidence.
+The supporting [observability excerpt](samples/observability-signal-coverage.md), from my Raster AI-service guide, helps operators choose between metrics, logs, reports, and deployment evidence.
 
 ## Verify the bundled examples
 
