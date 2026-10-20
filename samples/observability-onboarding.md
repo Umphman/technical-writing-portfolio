@@ -1,5 +1,7 @@
 # Explain and troubleshoot OpenTelemetry onboarding
 
+**Source:** my separate public OpenTelemetry case study, using a synthetic checkout application.
+
 **Readers:** developers choosing an instrumentation path and operators investigating missing telemetry.
 
 **My contribution:** I authored the original documentation for this public OpenTelemetry case study, using Codex to refine the text and help keep it aligned with implementation changes. The passages below are selected from that existing documentation; the connecting commentary was prepared for this portfolio with Codex assistance.

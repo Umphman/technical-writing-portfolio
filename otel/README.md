@@ -1,5 +1,7 @@
 # Diagnose a split trace and verify recovery
 
+**Source:** my separate public OpenTelemetry case study. The application and checkout flow are synthetic.
+
 A healthy HTTP response does not prove that a distributed trace is connected. This tutorial deliberately breaks context propagation between a synthetic checkout flow and its inventory operation, finds the two resulting traces in Tempo, and restores a connected journey.
 
 **Reader:** a developer or operator learning to validate an OpenTelemetry pipeline. **Result:** an identified failure and a fresh recovery probe, checked against local backends. The underlying case-study documentation is my existing work; this corrected procedure and its verification helpers were prepared with Codex during portfolio review.

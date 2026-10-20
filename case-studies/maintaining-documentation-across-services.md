@@ -1,6 +1,8 @@
 # Explaining AI proposals without implying execution authority
 
-> **Readers:** product managers, customers, investors conducting due diligence, engineers, and operators of a private research platform. **My contribution:** original documentation, review and approval, and ongoing maintenance, with AI assistance. **Sources:** authored guides and recorded revisions from June–September 2026, plus my account of the writing process. The excerpts describe historical source snapshots, not today's deployed system. Product names and private links are omitted; bracketed substitutions identify anonymized text.
+**Source:** my Sonar research-platform documentation, with documentation-maintenance guidance from Raster. The case combines anonymized excerpts and recorded revisions with my account of working across the ecosystem.
+
+> **Readers:** product managers, customers, investors conducting due diligence, engineers, and operators of a private research platform. **My contribution:** original documentation, review and approval, and ongoing maintenance, with AI assistance. **Sources:** authored guides and recorded revisions from June–September 2026, plus my account of the writing process. The excerpts describe historical source snapshots, not today's deployed system. Feature names and private links are omitted; bracketed substitutions identify anonymized text.
 
 ## The reader problem
 

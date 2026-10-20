@@ -1,5 +1,7 @@
 # Separate login credentials from application sessions
 
+**Source:** a fictional exercise created with Codex for this portfolio.
+
 An identity provider can recognize a user before your application has established a session for that user. Keeping those states distinct makes it easier to decide which credential belongs at each boundary.
 
 In this tutorial, you will run a fictional dashboard authentication example, read a user's saved views, and observe rejected requests. You will also check what happens when an identity credential expires and when the user logs out.

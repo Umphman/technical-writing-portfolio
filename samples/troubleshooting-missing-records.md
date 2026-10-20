@@ -1,5 +1,7 @@
 # Diagnose missing records when an optional field is null
 
+**Source:** a fictional exercise created with Codex for this portfolio.
+
 A support desk reports two unassigned tickets, but its ticket list shows only one. The second record exists. The tenant is correct. Retrying the same lookup changes nothing.
 
 This tutorial reproduces that failure in a fictional support-ticket service. You will trace the cause, select a corrected implementation, and verify recovery without widening tenant access.

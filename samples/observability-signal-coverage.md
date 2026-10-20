@@ -1,5 +1,7 @@
 # Document what telemetry actually exposes
 
+**Source:** documentation I authored for Raster's AI service. This anonymized adaptation draws on its observability guide and a recorded update to the guide and canonical index.
+
 **Reader:** an operator configuring monitoring for a service.
 
 **Scope:** an evidence-selection excerpt adapted from an observability guide I authored and maintained with AI assistance. The table below condenses the guide's distinctions into operator questions. Private feature names, metric identifiers, endpoints, and asset paths are omitted; this is a behavioral reference, not a deployment procedure.

@@ -1,5 +1,7 @@
 # Add, rename, and reset saved-item display names
 
+**Source:** documentation I authored for Raster's subscription service. This anonymized adaptation draws on its frontend integration guide.
+
 **Reader:** a frontend engineer integrating a backend feature.
 
 **Scope:** a behavior reference adapted from an integration guide I authored and maintained with AI assistance. It explains the edit form's rename, reset, and no-change semantics. Product nouns are generalized; private routes, request schemas, exact limits, and quota rules are omitted. This excerpt is not a complete API tutorial. Preparation added a source-checked clarification of omitted and empty values.

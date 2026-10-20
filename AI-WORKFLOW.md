@@ -1,6 +1,6 @@
 # How I use AI in documentation work
 
-I authored the original documentation across the repositories represented here and the public OpenTelemetry case study. I used Codex to refine the prose and assist with updates as we changed code and versions during development, including maintaining canonical current-status documentation.
+I authored the original documentation for the Raster/Sonar ecosystem and the separate public OpenTelemetry case study. The anonymized examples below draw on Sonar's cross-service documentation and Raster's observability guide and canonical index. I used Codex to refine the prose and assist with updates as we changed code and versions during development, including maintaining canonical current-status documentation.
 
 ## My review across services
 
